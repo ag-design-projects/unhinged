@@ -1,0 +1,87 @@
+@import '@workspace/neo-brutalism-ui/styles.css';
+
+@font-face {
+  font-family: 'Gocake';
+  src: url('/fonts/Gocake.ttf') format('truetype');
+  font-display: swap;
+  font-style: normal;
+  font-weight: 400;
+}
+
+:root {
+  --unhinged-display: 'Gocake', 'Arial Black', sans-serif;
+  --unhinged-body: 'Open Sans', Arial, sans-serif;
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+  width: 100%;
+  margin: 0;
+}
+
+html,
+body {
+  overflow-x: clip;
+}
+
+body {
+  min-width: 320px;
+  font-family: var(--unhinged-body);
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  min-width: 0;
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6,
+button,
+[role='button'],
+.font-display {
+  font-family: var(--unhinged-display);
+  font-weight: 400;
+}
+
+button,
+a,
+input,
+textarea,
+select {
+  max-width: 100%;
+}
+
+img,
+svg,
+video,
+canvas {
+  display: block;
+  max-width: 100%;
+}
+
+.safe-screen {
+  width: 100%;
+  min-height: 100svh;
+  overflow-x: clip;
+  padding:
+    max(1rem, env(safe-area-inset-top))
+    max(1rem, env(safe-area-inset-right))
+    max(1rem, env(safe-area-inset-bottom))
+    max(1rem, env(safe-area-inset-left));
+}
+
+.hard-shadow {
+  box-shadow: 4px 4px 0 #000;
+}
+
+.hard-shadow-light {
+  box-shadow: 4px 4px 0 #fff;
+}
