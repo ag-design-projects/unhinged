@@ -1,0 +1,19 @@
+kind = "design-system"
+previewPath = "/neo-brutalism-ui/"
+title = "Neo Brutalism UI"
+description = "A reusable design system imported from Marie Ooq's Neo-Brutalism UI Library, preserving its vivid palette, heavy black borders, offset shadows, compact typography, and core React component APIs."
+version = "1.0.0"
+id = "artifacts/neo-brutalism-ui"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/neo-brutalism-ui/" ]
+localPort = 21031
+
+[services.development]
+run = "pnpm --filter @workspace/neo-brutalism-ui run dev"
+
+[services.env]
+PORT = "21031"
+BASE_PATH = "/neo-brutalism-ui/"
