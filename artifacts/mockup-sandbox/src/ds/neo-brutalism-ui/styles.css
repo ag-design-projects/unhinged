@@ -1,0 +1,50 @@
+/* The ONLY Tailwind root for the "neo-brutalism-ui" design system's mockups.
+ *
+ * It imports that design system's full theme from the workspace package
+ * (Tailwind engine + @theme + tokens) exactly once, so this entry's frames
+ * render with neo-brutalism-ui's own build. The package's styles.css also registers
+ * its own components with Tailwind, so their utility classes are generated
+ * without a node_modules path here; mockup files under ./mockups are picked up
+ * by Tailwind's normal project scan.
+ *
+ * Do NOT import the sandbox's src/index.css here — that would stack a second
+ * Tailwind build and token set on the frame.
+ */
+@import '@workspace/neo-brutalism-ui/styles.css';
+
+@font-face {
+  font-family: 'Gocake';
+  src: url('/__mockup/fonts/Gocake.ttf') format('truetype');
+  font-display: swap;
+  font-style: normal;
+  font-weight: 400;
+}
+
+:root {
+  --font-display: 'Gocake', 'Arial Black', sans-serif;
+  --font-body: 'Open Sans', Arial, sans-serif;
+}
+
+body {
+  font-family: var(--font-body);
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6,
+button,
+[role='button'],
+.font-black {
+  font-family: var(--font-display) !important;
+  font-weight: 400 !important;
+}
+
+input,
+textarea,
+select,
+nav {
+  font-family: var(--font-body);
+}
