@@ -99,6 +99,62 @@ test("three clients create, join, and receive private assignments", async () => 
   }
 });
 
+test("preserves submitted votes when the voting deadline expires", async () => {
+  const httpServer = createServer();
+  const io = new Server(httpServer);
+  attachGameSocket(io, { timeoutMs: 250, store: new MemoryRoomStore() });
+  await new Promise<void>(resolve => httpServer.listen(0, "127.0.0.1", resolve));
+  const address = httpServer.address();
+  assert.ok(address && typeof address === "object");
+  const url = `http://127.0.0.1:${address.port}`;
+  const clients = ["Host", "Priya", "Rahul"].map(() => createClient(url, { transports: ["websocket"] }));
+
+  try {
+    await Promise.all(clients.map(client => new Promise<void>(resolve => client.on("connect", resolve))));
+    const created = await emitWithAck<{ roomCode: string }>(clients[0], "room:create", { name: "Host" });
+    await Promise.all([
+      emitWithAck(clients[1], "room:join", { roomCode: created.roomCode, name: "Priya" }),
+      emitWithAck(clients[2], "room:join", { roomCode: created.roomCode, name: "Rahul" }),
+    ]);
+
+    const answering = clients.map(client => waitForState(client, state => state.phase === "answering" && state.round === 1));
+    clients[0].emit("room:start", created.roomCode);
+    const answeringStates = await Promise.all(answering);
+    const voting = clients.map(client => waitForState(client, state => state.phase === "voting" && state.round === 1));
+    answeringStates.forEach((state, clientIndex) => {
+      for (const [answerIndex, assignment] of (state.assignments ?? []).entries()) {
+        const [pairId, question] = assignment.assignmentId.split(":");
+        clients[clientIndex].emit("game:answer", created.roomCode, {
+          pairId,
+          question: Number(question),
+          text: `p${clientIndex}-answer-${answerIndex}`,
+        });
+      }
+    });
+    const votingStates = await Promise.all(voting);
+    const selectedAnswerId = votingStates[0].voteGroups?.[0]?.answers[0]?.id;
+    assert.ok(selectedAnswerId);
+
+    const results = clients.map(client => waitForState(client, state => state.phase === "results" && state.round === 1));
+    clients[0].emit("game:vote", created.roomCode, { answerId: selectedAnswerId });
+    const resultStates = await Promise.all(results);
+
+    for (const state of resultStates) {
+      assert.equal(state.results?.answers.reduce((sum, answer) => sum + answer.votes, 0), 1);
+      assert.equal(state.results?.answers.find(answer => answer.id === selectedAnswerId)?.votes, 1);
+      assert.equal(state.results?.leaderboard.reduce((sum, player) => sum + player.score, 0), 100);
+      assert.deepEqual(
+        state.results?.leaderboard.map(player => ({ id: player.id, score: player.score })),
+        resultStates[0].results?.leaderboard.map(player => ({ id: player.id, score: player.score })),
+      );
+    }
+  } finally {
+    for (const client of clients) client.disconnect();
+    await io.close();
+    await new Promise<void>(resolve => httpServer.close(() => resolve()));
+  }
+});
+
 test("restores a persisted room and resumes the same private player identity", async () => {
   const store = new MemoryRoomStore();
   const token = "stable-successor-session-token";
