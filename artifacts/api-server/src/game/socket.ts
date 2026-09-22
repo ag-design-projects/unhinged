@@ -15,7 +15,7 @@ const emitRoom = (io: Server, roomCode: string) => {
 };
 const fail = (socket: Socket, error: unknown) => socket.emit("game:error", { message: error instanceof Error ? error.message : "Game action failed" });
 const findPlayer = (game: GameEngine, socket: Socket) => game.room.players.find(p => p.socketId === socket.id);
-const scheduleTimeout = (io: Server, game: GameEngine) => {
+const scheduleTimeout = (io: Server, game: GameEngine, timeoutMs: number) => {
   const round = game.room.round;
   const phase = game.room.phase;
   const deadline = game.room.deadline;
@@ -23,10 +23,10 @@ const scheduleTimeout = (io: Server, game: GameEngine) => {
     if (game.room.round === round && game.room.phase === phase && game.room.deadline === deadline) {
       game.timeout();
       emitRoom(io, game.room.code);
-      if (game.room.phase === "voting") scheduleTimeout(io, game);
+      if (game.room.phase === "voting") scheduleTimeout(io, game, timeoutMs);
       if (game.room.phase === "results") scheduleRoast(io, game);
     }
-  }, 45_000);
+  }, timeoutMs);
   timer.unref();
 };
 
@@ -67,7 +67,8 @@ const scheduleRoast = (io: Server, game: GameEngine) => {
     });
 };
 
-export function attachGameSocket(io: Server) {
+export function attachGameSocket(io: Server, options: { timeoutMs?: number } = {}) {
+  const timeoutMs = options.timeoutMs ?? 45_000;
   io.on("connection", socket => {
     const joinAttempts: number[] = [];
     const checkJoinRate = () => {
@@ -110,10 +111,10 @@ export function attachGameSocket(io: Server) {
         } catch (e) { fail(socket, e); }
       };
     };
-    socket.on("room:start", action((g, p) => { g.start(p.id); scheduleTimeout(io, g); }));
-    socket.on("game:answer", action((g, p, input: { text: string; pairId?: string; question?: number }) => { g.answer(p.id, input.text, input.pairId, input.question ?? 0); if (g.room.phase === "voting") scheduleTimeout(io, g); }));
+    socket.on("room:start", action((g, p) => { g.start(p.id); scheduleTimeout(io, g, timeoutMs); }));
+    socket.on("game:answer", action((g, p, input: { text: string; pairId?: string; question?: number }) => { g.answer(p.id, input.text, input.pairId, input.question ?? 0); if (g.room.phase === "voting") scheduleTimeout(io, g, timeoutMs); }));
     socket.on("game:vote", action((g, p, input: { answerId: string }) => { g.vote(p.id, input.answerId); if (g.room.phase === "results") scheduleRoast(io, g); }));
-    socket.on("game:next", action((g, p) => { if (p.id !== g.room.hostId && p.id !== g.room.powerChooserId) throw new Error("Only the host or winner can continue"); g.next(); if (g.room.phase === "answering") scheduleTimeout(io, g); }));
+    socket.on("game:next", action((g, p) => { if (p.id !== g.room.hostId && p.id !== g.room.powerChooserId) throw new Error("Only the host or winner can continue"); g.next(); if (g.room.phase === "answering") scheduleTimeout(io, g, timeoutMs); }));
     socket.on("game:power", action((g, p, input: { type: PowerType; targetPlayerId: string }) => g.choosePower(p.id, input.type, input.targetPlayerId)));
     socket.on("room:rematch", action((g, p) => g.rematch(p.id)));
     socket.on("disconnect", () => {
