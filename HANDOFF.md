@@ -6,7 +6,7 @@
 - Branch: `main`
 - Implementation commit: `1a5c317`
 - Product: responsive 3–8 player Socket.io party game
-- State model: server-authoritative, in-memory
+- State model: server-authoritative, PostgreSQL-backed room snapshots
 
 ## Shipped Scope
 
@@ -21,7 +21,9 @@
 - Tie handling, round winners, ability points, three powers, target selection, and reveal flow.
 - Server deadlines for answering and voting, including safe abstention handling.
 - Results, asynchronous host reactions with a 3.5-second fallback, final leaderboard, and host rematch.
-- Terminal connection-loss state with reconnection intentionally disabled for v1.
+- Stable room-scoped player identities with automatic reconnection and private-state restoration.
+- Host migration after a 30-second reconnect grace period.
+- Automatic cleanup after every player has been disconnected for two hours.
 - Collision-checked eight-character room codes and per-socket join throttling.
 - Neo-brutalist responsive UI based on the project design system.
 
@@ -51,6 +53,9 @@
   - `pnpm typecheck`
 - Socket.io is exposed through `/socket.io`.
 - API health check is available at `/api/healthz`.
+- Active room snapshots are stored in the `game_rooms` table.
+- `scripts/post-merge.sh` installs packages and applies the development database schema.
+- Replit Publish applies managed production schema changes.
 
 ## AI Host Reactions
 
@@ -63,9 +68,9 @@
 
 ## Intentional V1 Limitations
 
-- Rooms and game state are in memory and are lost when the API server restarts.
-- No reconnect or session restoration; disconnected players refresh and join a new room.
-- No host migration.
+- Resume credentials are stored in the browser for the specific room and device.
+- A host who remains disconnected past the 30-second grace period loses host control to the first connected player.
+- Rooms with no connected players are removed after two hours.
 - Late joiners are rejected after the game starts.
 - Power constraints are honor-system prompts rather than server-enforced content rules.
 - No database, login, moderation dashboard, or analytics.
@@ -77,4 +82,5 @@
 3. When changing phase transitions, test both normal completion and deadline completion.
 4. Guard asynchronous host-reaction updates with round, phase, and winner identity checks.
 5. Continue using the tokens and components from `artifacts/neo-brutalism-ui`; do not introduce local visual constants when the design system already provides them.
-6. Do not add reconnect support without also introducing stable player/session identities and explicit room cleanup rules.
+6. Preserve opaque resume tokens: only their SHA-256 hashes belong in persisted room state.
+7. Keep room persistence serialized per room so a slower older write cannot overwrite newer game state.

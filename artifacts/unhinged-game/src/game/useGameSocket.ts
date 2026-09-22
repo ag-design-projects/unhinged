@@ -8,16 +8,42 @@ export function useGameSocket() {
   const [lastResults, setLastResults] = useState<Results | null>(null);
   const [error, setError] = useState("");
   const [disconnected, setDisconnected] = useState(false);
+  const [reconnecting, setReconnecting] = useState(false);
   useEffect(() => {
-    const client = io({ path: "/socket.io", reconnection: false });
-    client.on("game:state", (state: Snapshot) => { setSnapshot(state); if (state.results) setLastResults(state.results); setError(""); });
+    const client = io({ path: "/socket.io", reconnection: true, reconnectionAttempts: 10, reconnectionDelay: 500, reconnectionDelayMax: 3_000 });
+    const resume = () => {
+      const roomCode = new URLSearchParams(window.location.search).get("room")?.toUpperCase();
+      const token = roomCode ? window.localStorage.getItem(`unhinged-session:${roomCode}`) : null;
+      if (!roomCode || !token) return;
+      setReconnecting(true);
+      client.emit("room:resume", { roomCode, sessionToken: token }, (result: { error?: string }) => {
+        if (!result?.error) return;
+        setReconnecting(false);
+        setDisconnected(true);
+        setSnapshot(null);
+        setError(result.error);
+      });
+    };
+    client.on("connect", resume);
+    client.on("game:state", (state: Snapshot) => {
+      setSnapshot(state);
+      if (state.results) setLastResults(state.results);
+      setError("");
+      setReconnecting(false);
+      setDisconnected(false);
+    });
     client.on("game:error", (data: { message?: string }) => setError(data.message || "Game action failed"));
     client.on("connect_error", () => setError("Connection lost. Please try again."));
     client.on("disconnect", reason => {
       if (reason === "io client disconnect") return;
+      setReconnecting(true);
+      setError("Connection lost. Reconnecting…");
+    });
+    client.io.on("reconnect_failed", () => {
+      setReconnecting(false);
       setDisconnected(true);
       setSnapshot(null);
-      setError("Connection lost. Refresh to rejoin.");
+      setError("Unable to reconnect. Refresh to rejoin.");
     });
     setSocket(client);
     return () => { client.disconnect(); };
@@ -28,14 +54,22 @@ export function useGameSocket() {
   }, [socket]);
   const create = useCallback((name: string) => {
     if (!socket) return setError("Connecting to game server…");
-    socket.emit("room:create", { name });
+    socket.emit("room:create", { name }, (result: { roomCode: string; sessionToken: string }) => {
+      if (!result?.roomCode || !result.sessionToken) return;
+      window.localStorage.setItem(`unhinged-session:${result.roomCode}`, result.sessionToken);
+      window.history.replaceState({}, "", `?room=${result.roomCode}`);
+    });
   }, [socket]);
   const join = useCallback((roomCode: string, name: string) => {
     if (!socket) return setError("Connecting to game server…");
-    socket.emit("room:join", { roomCode: roomCode.toUpperCase(), name });
+    socket.emit("room:join", { roomCode: roomCode.toUpperCase(), name }, (result: { roomCode: string; sessionToken: string }) => {
+      if (!result?.roomCode || !result.sessionToken) return;
+      window.localStorage.setItem(`unhinged-session:${result.roomCode}`, result.sessionToken);
+      window.history.replaceState({}, "", `?room=${result.roomCode}`);
+    });
   }, [socket]);
   return {
-    snapshot, lastResults, error, disconnected, clearError: () => setError(""),
+    snapshot, lastResults, error, disconnected, reconnecting, clearError: () => setError(""),
     create, join,
     start: () => emit("room:start", snapshot?.roomCode),
     answer: (input: { text: string; pairId?: string; question?: number }) => emit("game:answer", snapshot?.roomCode, input),

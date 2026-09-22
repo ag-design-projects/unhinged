@@ -1,7 +1,7 @@
 export type Phase = "lobby" | "answering" | "voting" | "results" | "powerSelect" | "powerReveal" | "gameOver";
 export type PowerType = "word" | "persona" | "emoji";
 
-export interface Player { id: string; name: string; score: number; abilityPoints: number }
+export interface Player { id: string; name: string; score: number; abilityPoints: number; connected?: boolean }
 export interface Assignment { assignmentId: string; prompt: string; question: number; answer: string | null }
 export interface VoteGroup { matchupId: string; question: number; answers: { id: string; text: string }[]; voted: boolean }
 export interface Results {

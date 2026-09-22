@@ -1,15 +1,19 @@
 import assert from "node:assert/strict";
+import { createHash, randomUUID } from "node:crypto";
 import { createServer } from "node:http";
 import test from "node:test";
 import { Server } from "socket.io";
 import { io as createClient, type Socket as ClientSocket } from "socket.io-client";
 import { attachGameSocket } from "./socket";
+import { MemoryRoomStore } from "./persistence";
 
 type State = {
   roomCode: string;
+  hostId: string;
   phase: string;
   round: number;
   players: Array<{ id: string; name: string }>;
+  me?: { id: string; name: string };
   assignments?: Array<{ assignmentId: string; prompt: string; answer: string | null }>;
   voteGroups?: Array<{ matchupId: string; question: number; answers: Array<{ id: string; text: string }>; voted: boolean }>;
   winnerId?: string;
@@ -59,7 +63,7 @@ function waitForGameError(client: ClientSocket) {
 test("three clients create, join, and receive private assignments", async () => {
   const httpServer = createServer();
   const io = new Server(httpServer);
-  attachGameSocket(io);
+  attachGameSocket(io, { store: new MemoryRoomStore() });
   await new Promise<void>(resolve => httpServer.listen(0, "127.0.0.1", resolve));
   const address = httpServer.address();
   assert.ok(address && typeof address === "object");
@@ -95,10 +99,91 @@ test("three clients create, join, and receive private assignments", async () => 
   }
 });
 
+test("restores a persisted room and resumes the same private player identity", async () => {
+  const store = new MemoryRoomStore();
+  const token = "stable-successor-session-token";
+  const hostId = randomUUID();
+  const playerId = randomUUID();
+  await store.save({
+    code: "RESTORED",
+    hostId,
+    players: [{
+      id: hostId,
+      name: "Absent host",
+      score: 0,
+      abilityPoints: 0,
+      sessionTokenHash: createHash("sha256").update("absent-host-token").digest("hex"),
+    }, {
+      id: playerId,
+      name: "Successor",
+      score: 400,
+      abilityPoints: 2,
+      sessionTokenHash: createHash("sha256").update(token).digest("hex"),
+    }],
+    phase: "lobby",
+    round: 0,
+    pairs: [],
+    answers: [],
+    votes: {},
+    modifier: null,
+    roastLine: null,
+  });
+  const httpServer = createServer();
+  const io = new Server(httpServer);
+  attachGameSocket(io, { store, reconnectGraceMs: 20, abandonedRoomTtlMs: 5_000 });
+  await new Promise<void>(resolve => httpServer.listen(0, "127.0.0.1", resolve));
+  const address = httpServer.address();
+  assert.ok(address && typeof address === "object");
+  const client = createClient(`http://127.0.0.1:${address.port}`, { transports: ["websocket"] });
+  try {
+    await new Promise<void>(resolve => client.on("connect", resolve));
+    const resumed = waitForState(client, state => state.roomCode === "RESTORED" && state.me?.id === playerId && state.hostId === playerId);
+    const ack = await emitWithAck<{ playerId: string }>(client, "room:resume", { roomCode: "RESTORED", sessionToken: token });
+    assert.equal(ack.playerId, playerId);
+    const state = await resumed;
+    assert.equal(state.me?.id, playerId);
+    assert.equal(state.hostId, playerId);
+    assert.equal((state.me as { score?: number }).score, 400);
+  } finally {
+    client.disconnect();
+    await io.close();
+    await new Promise<void>(resolve => httpServer.close(() => resolve()));
+  }
+});
+
+test("migrates the host after the reconnect grace period and deletes abandoned rooms", async () => {
+  const store = new MemoryRoomStore();
+  const httpServer = createServer();
+  const io = new Server(httpServer);
+  attachGameSocket(io, { store, reconnectGraceMs: 20, abandonedRoomTtlMs: 40 });
+  await new Promise<void>(resolve => httpServer.listen(0, "127.0.0.1", resolve));
+  const address = httpServer.address();
+  assert.ok(address && typeof address === "object");
+  const url = `http://127.0.0.1:${address.port}`;
+  const host = createClient(url, { transports: ["websocket"] });
+  const successor = createClient(url, { transports: ["websocket"] });
+  try {
+    await Promise.all([host, successor].map(client => new Promise<void>(resolve => client.on("connect", resolve))));
+    const created = await emitWithAck<{ roomCode: string; playerId: string }>(host, "room:create", { name: "Host" });
+    const joined = await emitWithAck<{ playerId: string }>(successor, "room:join", { roomCode: created.roomCode, name: "Successor" });
+    const migrated = waitForState(successor, state => state.hostId === joined.playerId);
+    host.disconnect();
+    assert.equal((await migrated).hostId, joined.playerId);
+    successor.disconnect();
+    await new Promise(resolve => setTimeout(resolve, 80));
+    assert.equal((await store.loadAll()).length, 0);
+  } finally {
+    host.disconnect();
+    successor.disconnect();
+    await io.close();
+    await new Promise<void>(resolve => httpServer.close(() => resolve()));
+  }
+});
+
 test("three clients complete all rounds, a deadline transition, powers, final results, and rematch", async () => {
   const httpServer = createServer();
   const io = new Server(httpServer);
-  attachGameSocket(io, { timeoutMs: 500 });
+  attachGameSocket(io, { timeoutMs: 500, store: new MemoryRoomStore() });
   await new Promise<void>(resolve => httpServer.listen(0, "127.0.0.1", resolve));
   const address = httpServer.address();
   assert.ok(address && typeof address === "object");

@@ -20,7 +20,8 @@ if (Number.isNaN(port) || port <= 0) {
 
 const httpServer = createServer(app);
 const io = new Server(httpServer, { cors: { origin: true, credentials: true } });
-attachGameSocket(io);
+const gameSocket = attachGameSocket(io);
+await gameSocket.ready;
 httpServer.on("error", (err) => {
   logger.error({ err }, "Error listening on port");
   process.exit(1);

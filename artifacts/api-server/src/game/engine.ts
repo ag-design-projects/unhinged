@@ -2,7 +2,10 @@ export type Phase =
   | "lobby" | "answering" | "voting" | "results"
   | "powerSelect" | "powerReveal" | "gameOver";
 export type PowerType = "word" | "persona" | "emoji";
-export interface Player { id: string; name: string; socketId?: string; score: number; abilityPoints: number; }
+export interface Player {
+  id: string; name: string; socketId?: string; score: number; abilityPoints: number;
+  sessionTokenHash?: string; disconnectedAt?: number;
+}
 export interface Pair { id: string; playerIds: [string, string]; prompts: [string, string]; }
 export interface Answer { id: string; playerId: string; pairId?: string; question: number; text: string; }
 export interface Modifier { type: PowerType; value: string; targetPlayerId: string; }
@@ -27,9 +30,13 @@ const fallbackRoasts = ["That answer has been forwarded to absolutely nobody.", 
 export class GameEngine {
   readonly room: Room;
   private readonly random: () => number;
-  constructor(code: string, host: Player, random = Math.random) {
+  constructor(code: string, host: Player, random = Math.random, restoredRoom?: Room) {
     this.random = random;
-    this.room = { code, hostId: host.id, players: [host], phase: "lobby", round: 0, pairs: [], answers: [], votes: {}, modifier: null, roastLine: null };
+    this.room = restoredRoom ?? { code, hostId: host.id, players: [host], phase: "lobby", round: 0, pairs: [], answers: [], votes: {}, modifier: null, roastLine: null };
+  }
+  static restore(room: Room, random = Math.random) {
+    if (!room.players[0]) throw new Error("Cannot restore an empty room");
+    return new GameEngine(room.code, room.players[0], random, room);
   }
   addPlayer(player: Player) {
     if (this.room.phase !== "lobby") throw new Error("Game already started");
@@ -150,7 +157,7 @@ export class GameEngine {
 
 export function snapshot(room: Room, viewerId: string) {
   const own = room.players.find(p => p.id === viewerId);
-  const publicPlayers = room.players.map(p => ({ id: p.id, name: p.name, score: p.score, abilityPoints: p.abilityPoints }));
+  const publicPlayers = room.players.map(p => ({ id: p.id, name: p.name, score: p.score, abilityPoints: p.abilityPoints, connected: Boolean(p.socketId) }));
   const dto: Record<string, unknown> = {
     roomCode: room.code, hostId: room.hostId, phase: room.phase, round: room.round,
     players: publicPlayers, prompt: room.prompt, deadline: room.deadline,
