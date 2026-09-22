@@ -7,11 +7,18 @@ export function useGameSocket() {
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
   const [lastResults, setLastResults] = useState<Results | null>(null);
   const [error, setError] = useState("");
+  const [disconnected, setDisconnected] = useState(false);
   useEffect(() => {
-    const client = io({ path: "/socket.io" });
+    const client = io({ path: "/socket.io", reconnection: false });
     client.on("game:state", (state: Snapshot) => { setSnapshot(state); if (state.results) setLastResults(state.results); setError(""); });
     client.on("game:error", (data: { message?: string }) => setError(data.message || "Game action failed"));
     client.on("connect_error", () => setError("Connection lost. Please try again."));
+    client.on("disconnect", reason => {
+      if (reason === "io client disconnect") return;
+      setDisconnected(true);
+      setSnapshot(null);
+      setError("Connection lost. Refresh to rejoin.");
+    });
     setSocket(client);
     return () => { client.disconnect(); };
   }, []);
@@ -28,7 +35,7 @@ export function useGameSocket() {
     socket.emit("room:join", { roomCode: roomCode.toUpperCase(), name });
   }, [socket]);
   return {
-    snapshot, lastResults, error, clearError: () => setError(""),
+    snapshot, lastResults, error, disconnected, clearError: () => setError(""),
     create, join,
     start: () => emit("room:start", snapshot?.roomCode),
     answer: (input: { text: string; pairId?: string; question?: number }) => emit("game:answer", snapshot?.roomCode, input),

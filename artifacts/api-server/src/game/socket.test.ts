@@ -35,6 +35,16 @@ function emitWithAck<T>(client: ClientSocket, event: string, payload: unknown) {
   });
 }
 
+function waitForGameError(client: ClientSocket) {
+  return new Promise<string>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error("Timed out waiting for game error")), 3_000);
+    client.once("game:error", (result: { message: string }) => {
+      clearTimeout(timer);
+      resolve(result.message);
+    });
+  });
+}
+
 test("three clients create, join, and receive private assignments", async () => {
   const httpServer = createServer();
   const io = new Server(httpServer);
@@ -47,7 +57,13 @@ test("three clients create, join, and receive private assignments", async () => 
 
   try {
     await Promise.all(clients.map(client => new Promise<void>(resolve => client.on("connect", () => resolve()))));
+    for (const payload of [null, [], {}, { name: null }]) {
+      const error = waitForGameError(clients[0]);
+      clients[0].emit("room:create", payload);
+      assert.match(await error, /Invalid room request|Name is required/);
+    }
     const created = await emitWithAck<{ roomCode: string }>(clients[0], "room:create", { name: "Host" });
+    assert.match(created.roomCode, /^[A-F0-9]{8}$/);
     await emitWithAck(clients[1], "room:join", { roomCode: created.roomCode, name: "Priya" });
     const lobbyReady = waitForState(clients[0], state => state.phase === "lobby" && state.players.length === 3);
     await emitWithAck(clients[2], "room:join", { roomCode: created.roomCode, name: "Rahul" });

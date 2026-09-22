@@ -59,6 +59,14 @@ export class GameEngine {
     if (this.room.phase !== "answering") throw new Error("Not accepting answers");
     if (!text.trim() || text.length > 32) throw new Error("Answer must be 1-32 characters");
     if (!this.room.players.some(p => p.id === playerId)) throw new Error("Unknown player");
+    if (this.room.round < 3) {
+      const pair = this.room.pairs.find(candidate => candidate.id === pairId);
+      if (!pair || !pair.playerIds.includes(playerId) || !Number.isInteger(question) || question < 0 || question > 1) {
+        throw new Error("Invalid answer assignment");
+      }
+    } else if (pairId !== undefined || question !== 0) {
+      throw new Error("Invalid final answer assignment");
+    }
     const key = `${playerId}:${pairId ?? "final"}:${question}`;
     if (this.room.answers.some(a => a.id === key)) throw new Error("Answer already submitted");
     this.room.answers.push({ id: key, playerId, pairId, question, text: text.trim() });
@@ -72,8 +80,11 @@ export class GameEngine {
     if (this.room.phase !== "voting") throw new Error("Not accepting votes");
     const answer = this.room.answers.find(a => a.id === answerId);
     if (!answer || answer.playerId === voterId) throw new Error("Invalid or private vote");
-    if (this.room.round < 3 && this.room.pairs.find(pair => pair.id === answer.pairId)?.playerIds.includes(voterId)) {
-      throw new Error("Players cannot vote in their own matchup");
+    if (this.room.round < 3) {
+      const pair = this.room.pairs.find(candidate => candidate.id === answer.pairId);
+      if (!pair || !pair.playerIds.includes(answer.playerId) || pair.playerIds.includes(voterId) || (answer.question !== 0 && answer.question !== 1)) {
+        throw new Error("Invalid or private vote");
+      }
     }
     const key = this.room.round === 3 ? voterId : `${voterId}:${answer.pairId}:${answer.question}`;
     if (this.room.votes[key]) throw new Error("Vote already submitted");
@@ -131,19 +142,9 @@ export class GameEngine {
         this.room.answers.push({ id: `${p.id}:final:0`, playerId: p.id, question: 0, text: "No comment." });
       this.room.phase = "voting";
       this.room.deadline = Date.now() + 45_000;
+      return;
     }
-    if (this.room.phase === "voting") {
-      for (const voter of this.room.players) for (const pair of this.room.pairs) for (let q = 0; q < 2; q++) {
-        if (pair.playerIds.includes(voter.id)) continue;
-        const candidates = this.room.answers.filter(a => a.pairId === pair.id && a.question === q && a.playerId !== voter.id);
-        if (candidates.length) this.room.votes[`${voter.id}:${pair.id}:${q}`] = candidates[0].id;
-      }
-      if (this.room.round === 3) for (const voter of this.room.players) {
-        const candidate = this.room.answers.find(a => a.playerId !== voter.id);
-        if (candidate) this.room.votes[`${voter.id}:final:0`] = candidate.id;
-      }
-      this.finishResults();
-    }
+    if (this.room.phase === "voting") this.finishResults();
   }
 }
 

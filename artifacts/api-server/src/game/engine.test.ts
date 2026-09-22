@@ -37,3 +37,26 @@ test("scores use 100 points per vote and award ability points", () => {
   assert.ok(game.room.players.some(p => p.score > 0));
   assert.equal(game.room.players.find(p => p.id === game.room.winnerId)?.abilityPoints, 2);
 });
+
+test("rejects answers outside the player's server-owned assignments", () => {
+  const game = started();
+  const foreignPair = game.room.pairs.find(pair => !pair.playerIds.includes("a"));
+  assert.ok(foreignPair);
+  assert.throws(() => game.answer("a", "forged", foreignPair.id, 0), /Invalid answer assignment/);
+  assert.throws(() => game.answer("a", "forged", game.room.pairs[0].id, 9), /Invalid answer assignment/);
+  assert.equal(game.room.answers.length, 0);
+});
+
+test("answer timeout opens voting and vote timeout preserves real votes", () => {
+  const game = started();
+  game.timeout();
+  assert.equal(game.room.phase, "voting");
+  assert.equal(game.room.answers.length, 12);
+  const group = (snapshot(game.room, "a").voteGroups as Array<{ answers: Array<{ id: string }> }>)[0];
+  game.vote("a", group.answers[1].id);
+  const chosen = Object.values(game.room.votes)[0];
+  game.timeout();
+  assert.equal(game.room.phase, "results");
+  assert.equal(Object.values(game.room.votes).length, 1);
+  assert.equal(Object.values(game.room.votes)[0], chosen);
+});
