@@ -1,6 +1,5 @@
 import type { Server, Socket } from "socket.io";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
-import { openai } from "@workspace/integrations-openai-ai-server";
 import { GameEngine, snapshot, type Player, type PowerType } from "./engine";
 import { PostgresRoomStore, type RoomStore } from "./persistence";
 
@@ -36,6 +35,8 @@ const scheduleTimeout = (io: Server, game: GameEngine, timeoutMs: number, persis
 };
 
 async function generateRoast(answer: string): Promise<string | undefined> {
+  if (process.env["NODE_ENV"] === "test") return undefined;
+  const { openai } = await import("@workspace/integrations-openai-ai-server");
   const response = await openai.chat.completions.create({
     model: "gpt-5-mini",
     max_completion_tokens: 8192,
