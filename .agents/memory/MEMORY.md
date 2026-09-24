@@ -1,2 +1,2 @@
-- [UNHINGED screen mockups](unhinged-mockups.md) — 13 mobile screens built in mockup-sandbox DS entry; shape IDs and visual palette locked.
+- [GitHub push authentication](github-push-auth.md) — CLI authentication and Git HTTPS credentials can diverge after workspace changes.
 - [Standalone JSX tests](standalone-jsx-tests.md) — tsx's test runtime needs an automatic JSX pragma for components in the web app.
