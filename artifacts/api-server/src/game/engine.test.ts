@@ -22,10 +22,22 @@ test("voting snapshots never expose the viewer's own answer", () => {
   const game = started();
   for (const pair of game.room.pairs) for (const id of pair.playerIds) for (let q = 0; q < 2; q++) game.answer(id, `${id}${q}`, pair.id, q);
   const view = snapshot(game.room, "a");
-  const groups = view.voteGroups as Array<{ answers: Array<{ text: string }> }>;
+  const groups = view.voteGroups as Array<{ answers: Array<{ id: string; text: string }> }>;
   assert.equal(groups.flatMap(group => group.answers).some(answer => answer.text.startsWith("a")), false);
   assert.equal(groups.every(group => group.answers.length === 2), true);
   assert.equal(groups.length, 2);
+  const review = view.answerList as Array<{ authorId: string; prompt: string; text: string; submitted: boolean }>;
+  assert.equal(review.length, 12);
+  assert.equal(review.filter(a => a.authorId === "a").length, 4);
+  assert.equal(review.every(a => a.prompt && a.submitted), true);
+  assert.throws(() => game.vote("a", game.room.answers.find(a => a.playerId === "a")!.id), /Invalid or private vote/);
+  game.vote("a", groups[0].answers[0].id);
+  assert.deepEqual(snapshot(game.room, "a").answerList, review);
+  game.timeout();
+  const results = (snapshot(game.room, "a").results as { answers: Array<{ authorId: string; text: string; votes: number; submitted: boolean }> }).answers;
+  assert.equal(results.length, 12);
+  assert.equal(results.filter(a => a.authorId === "a").length, 4);
+  assert.equal(results.every(a => a.submitted && a.text !== ""), true);
 });
 
 test("scores use 100 points per vote and award ability points", () => {
@@ -50,16 +62,44 @@ test("rejects answers outside the player's server-owned assignments", () => {
 
 test("answer timeout opens voting and vote timeout preserves real votes", () => {
   const game = started();
+  const pair = game.room.pairs.find(p => p.playerIds.includes("a"))!;
+  game.answer("a", "No comment.", pair.id, 0);
   game.timeout();
   assert.equal(game.room.phase, "voting");
   assert.equal(game.room.answers.length, 12);
-  const group = (snapshot(game.room, "a").voteGroups as Array<{ answers: Array<{ id: string }> }>)[0];
-  game.vote("a", group.answers[1].id);
+  const view = snapshot(game.room, "b");
+  const review = view.answerList as Array<{ id: string; authorId: string; text: string; submitted: boolean }>;
+  assert.equal(review.length, 12);
+  assert.equal(review.find(a => a.authorId === "a" && a.text === "No comment.")?.submitted, true);
+  assert.equal(review.filter(a => !a.submitted && a.text === "").length, 11);
+  const missedId = review.find(a => !a.submitted)!.id;
+  assert.equal((view.voteGroups as Array<{ answers: Array<{ id: string }> }>).flatMap(g => g.answers).some(a => a.id === missedId), false);
+  assert.throws(() => game.vote("b", missedId), /Invalid or private vote/);
+  game.vote("c", game.room.answers.find(a => a.text === "No comment.")!.id);
   const chosen = Object.values(game.room.votes)[0];
   game.timeout();
   assert.equal(game.room.phase, "results");
   assert.equal(Object.values(game.room.votes).length, 1);
   assert.equal(Object.values(game.room.votes)[0], chosen);
+  const results = (snapshot(game.room, "a").results as { answers: Array<{ text: string; submitted: boolean; votes: number }> }).answers;
+  assert.equal(results.length, 12);
+  assert.equal(results.find(a => a.text === "No comment.")?.votes, 1);
+  assert.equal(results.filter(a => !a.submitted).length, 11);
+});
+
+test("final-round spectators can review their own answer without voting for it", () => {
+  const game = started();
+  game.room.round = 3;
+  game.room.phase = "answering";
+  game.room.pairs = [];
+  game.room.prompt = "Final ______.";
+  game.answer("a", "mine");
+  game.answer("b", "theirs");
+  game.answer("c", "third");
+  const view = snapshot(game.room, "a");
+  assert.equal((view.answerList as Array<{ text: string }>).some(a => a.text === "mine"), true);
+  assert.equal((view.voteGroups as Array<{ answers: Array<{ text: string }> }>)[0].answers.some(a => a.text === "mine"), false);
+  assert.throws(() => game.vote("a", "a:final:0"), /Invalid or private vote/);
 });
 
 test("eight-player matches draw unique questions across all rounds, restore, and reset on rematch", () => {

@@ -1,3 +1,4 @@
+/** @jsxRuntime automatic */
 import { type ReactNode } from "react";
 import { Button } from "@workspace/neo-brutalism-ui/components/button";
 import { Input } from "@workspace/neo-brutalism-ui/components/input";

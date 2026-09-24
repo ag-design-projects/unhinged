@@ -9,7 +9,7 @@ export interface Player {
   sessionTokenHash?: string; disconnectedAt?: number;
 }
 export interface Pair { id: string; playerIds: [string, string]; prompts: [string, string]; }
-export interface Answer { id: string; playerId: string; pairId?: string; question: number; text: string; }
+export interface Answer { id: string; playerId: string; pairId?: string; question: number; text: string; submitted?: boolean; }
 export interface Modifier { type: PowerType; value: string; targetPlayerId: string; }
 export interface Room {
   code: string; hostId: string; players: Player[]; phase: Phase; round: number;
@@ -110,7 +110,7 @@ export class GameEngine {
     }
     const key = `${playerId}:${pairId ?? "final"}:${question}`;
     if (this.room.answers.some(a => a.id === key)) throw new Error("Answer already submitted");
-    this.room.answers.push({ id: key, playerId, pairId, question, text: text.trim() });
+    this.room.answers.push({ id: key, playerId, pairId, question, text: text.trim(), submitted: true });
     const required = this.room.round < 3 ? this.room.players.length * 4 : this.room.players.length;
     if (this.room.answers.length >= required) {
       this.room.phase = "voting";
@@ -120,7 +120,7 @@ export class GameEngine {
   vote(voterId: string, answerId: string) {
     if (this.room.phase !== "voting") throw new Error("Not accepting votes");
     const answer = this.room.answers.find(a => a.id === answerId);
-    if (!answer || answer.playerId === voterId) throw new Error("Invalid or private vote");
+    if (!answer || answer.submitted === false || answer.playerId === voterId) throw new Error("Invalid or private vote");
     if (this.room.round < 3) {
       const pair = this.room.pairs.find(candidate => candidate.id === answer.pairId);
       if (!pair || !pair.playerIds.includes(answer.playerId) || pair.playerIds.includes(voterId) || (answer.question !== 0 && answer.question !== 1)) {
@@ -178,9 +178,9 @@ export class GameEngine {
     if (this.room.phase === "answering") {
       if (this.room.round < 3) for (const pair of this.room.pairs) for (const playerId of pair.playerIds) for (let q = 0; q < 2; q++) {
         if (!this.room.answers.some(a => a.playerId === playerId && a.pairId === pair.id && a.question === q))
-          this.room.answers.push({ id: `${playerId}:${pair.id}:${q}`, playerId, pairId: pair.id, question: q, text: "No comment." });
+          this.room.answers.push({ id: `${playerId}:${pair.id}:${q}`, playerId, pairId: pair.id, question: q, text: "", submitted: false });
       } else for (const p of this.room.players) if (!this.room.answers.some(a => a.playerId === p.id))
-        this.room.answers.push({ id: `${p.id}:final:0`, playerId: p.id, question: 0, text: "No comment." });
+        this.room.answers.push({ id: `${p.id}:final:0`, playerId: p.id, question: 0, text: "", submitted: false });
       this.room.phase = "voting";
       this.room.deadline = Date.now() + 45_000;
       return;
@@ -192,6 +192,14 @@ export class GameEngine {
 export function snapshot(room: Room, viewerId: string) {
   const own = room.players.find(p => p.id === viewerId);
   const publicPlayers = room.players.map(p => ({ id: p.id, name: p.name, score: p.score, abilityPoints: p.abilityPoints, connected: Boolean(p.socketId) }));
+  const answerList = () => room.answers.map(a => ({
+    id: a.id,
+    authorId: a.playerId,
+    authorName: room.players.find(p => p.id === a.playerId)?.name,
+    prompt: room.round === 3 ? room.prompt : room.pairs.find(pair => pair.id === a.pairId)?.prompts[a.question],
+    text: a.text,
+    submitted: a.submitted !== false,
+  }));
   const dto: Record<string, unknown> = {
     roomCode: room.code, hostId: room.hostId, phase: room.phase, round: room.round,
     players: publicPlayers, prompt: room.prompt, deadline: room.deadline,
@@ -211,8 +219,9 @@ export function snapshot(room: Room, viewerId: string) {
         })))
       : [{ assignmentId: "final:0", prompt: room.prompt, question: 0, answer: room.answers.find(a => a.playerId === viewerId)?.text ?? null }];
   } else if (room.phase === "voting") {
+    dto.answerList = answerList();
     const groups = new Map<string, { matchupId: string; question: number; answers: { id: string; text: string }[] }>();
-    for (const a of room.answers) if (a.playerId !== viewerId && (room.round === 3 || !room.pairs.find(pair => pair.id === a.pairId)?.playerIds.includes(viewerId))) {
+    for (const a of room.answers) if (a.submitted !== false && a.playerId !== viewerId && (room.round === 3 || !room.pairs.find(pair => pair.id === a.pairId)?.playerIds.includes(viewerId))) {
       const matchupId = a.pairId ?? "final";
       const key = `${matchupId}:${a.question}`;
       const group = groups.get(key) ?? { matchupId, question: a.question, answers: [] };
@@ -222,7 +231,7 @@ export function snapshot(room: Room, viewerId: string) {
   } else if (room.phase === "results" || room.phase === "gameOver") {
     dto.results = {
       winnerId: room.winnerId, roastLine: room.roastLine,
-      answers: room.answers.map(a => ({ id: a.id, authorId: a.playerId, authorName: room.players.find(p => p.id === a.playerId)?.name, text: a.text, votes: Object.values(room.votes).filter(v => v === a.id).length })),
+      answers: answerList().map(a => ({ ...a, votes: Object.values(room.votes).filter(v => v === a.id).length })),
       leaderboard: [...publicPlayers].sort((a, b) => b.score - a.score),
     };
   }

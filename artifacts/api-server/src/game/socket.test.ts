@@ -15,6 +15,7 @@ type State = {
   players: Array<{ id: string; name: string }>;
   me?: { id: string; name: string };
   assignments?: Array<{ assignmentId: string; prompt: string; answer: string | null }>;
+  answerList?: Array<{ id: string; authorId: string; text: string; submitted: boolean }>;
   voteGroups?: Array<{ matchupId: string; question: number; answers: Array<{ id: string; text: string }>; voted: boolean }>;
   winnerId?: string;
   powerChooserId?: string;
@@ -401,9 +402,12 @@ test("three clients complete all rounds, a deadline transition, powers, final re
       text: "before-timeout",
     });
     votingStates = await round2Voting;
-    assert.equal(votingStates[0].voteGroups?.flatMap(group => group.answers).some(answer => answer.text === "No comment."), true);
-    resultStates = await submitVotes(votingStates, 2);
-    assert.equal(resultStates[0].results?.leaderboard.reduce((sum, player) => sum + player.score, 0), 1_500);
+    assert.equal(votingStates[0].answerList?.length, 12);
+    assert.equal(votingStates[0].answerList?.filter(answer => !answer.submitted).length, 11);
+    assert.equal(votingStates[0].answerList?.some(answer => answer.text === "before-timeout" && answer.submitted), true);
+    assert.equal(votingStates[0].voteGroups?.flatMap(group => group.answers).some(answer => answer.text === ""), false);
+    resultStates = await waitForAll("results", 2);
+    assert.equal(resultStates[0].results?.leaderboard.reduce((sum, player) => sum + player.score, 0), 600);
 
     answeringStates = await usePowerAndContinue(2, resultStates);
     checkPrompts(answeringStates);
@@ -412,7 +416,7 @@ test("three clients complete all rounds, a deadline transition, powers, final re
     resultStates = await submitVotes(votingStates, 3);
     const finalLeaderboard = resultStates[0].results?.leaderboard;
     assert.ok(finalLeaderboard);
-    assert.equal(finalLeaderboard.reduce((sum, player) => sum + player.score, 0), 2_100);
+    assert.equal(finalLeaderboard.reduce((sum, player) => sum + player.score, 0), 1_200);
     assert.deepEqual(finalLeaderboard.map(player => player.id), resultStates[1].results?.leaderboard.map(player => player.id));
     assert.equal(finalLeaderboard.every((player, index) => index === 0 || finalLeaderboard[index - 1].score >= player.score), true);
 

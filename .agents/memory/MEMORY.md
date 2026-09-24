@@ -1,1 +1,2 @@
 - [UNHINGED screen mockups](unhinged-mockups.md) — 13 mobile screens built in mockup-sandbox DS entry; shape IDs and visual palette locked.
+- [Standalone JSX tests](standalone-jsx-tests.md) — tsx's test runtime needs an automatic JSX pragma for components in the web app.
