@@ -17,7 +17,7 @@ const emitRoom = (io: Server, game: GameEngine) => {
 const fail = (socket: Socket, error: unknown) => socket.emit("game:error", { message: error instanceof Error ? error.message : "Game action failed" });
 const findPlayer = (game: GameEngine, socket: Socket) => game.room.players.find(p => p.socketId === socket.id);
 type PersistRoom = (game: GameEngine) => Promise<void>;
-const scheduleTimeout = (io: Server, game: GameEngine, timeoutMs: number, persist: PersistRoom, delayMs = timeoutMs) => {
+const scheduleTimeout = (io: Server, game: GameEngine, timeoutMs: number | undefined, persist: PersistRoom, delayMs = timeoutMs ?? Math.max(0, (game.room.deadline ?? Date.now()) - Date.now())) => {
   const round = game.room.round;
   const phase = game.room.phase;
   const deadline = game.room.deadline;
@@ -73,7 +73,7 @@ export function attachGameSocket(io: Server, options: {
   const hostTimers = new Map<string, NodeJS.Timeout>();
   const cleanupTimers = new Map<string, NodeJS.Timeout>();
   const persistQueues = new Map<string, Promise<void>>();
-  const timeoutMs = options.timeoutMs ?? 45_000;
+  const timeoutMs = options.timeoutMs;
   const reconnectGraceMs = options.reconnectGraceMs ?? 30_000;
   const abandonedRoomTtlMs = options.abandonedRoomTtlMs ?? 2 * 60 * 60 * 1000;
   const store = options.store ?? new PostgresRoomStore();

@@ -24,6 +24,8 @@ const validPrompt = (prompt: unknown): prompt is string =>
 const words = ["synergy", "alignment", "bandwidth", "leverage", "circle-back", "deliverable", "stakeholder", "pivot", "roadmap", "touch-base", "workflow", "scalable", "quick-win", "deep-dive", "actionable", "visibility", "ideate", "optics", "boil-the-ocean", "low-hanging-fruit"];
 const personas = ["an overly optimistic CEO", "a passive-aggressive manager", "an HR manager trying not to panic", "a LinkedIn influencer", "a brutally honest intern", "a CEO who has no idea what is happening"];
 const fallbackRoasts = ["That answer has been forwarded to absolutely nobody.", "Bold strategy. The board is concerned.", "Somewhere, a spreadsheet just sighed.", "Absolutely aligned with the chaos.", "A truly impressive use of workplace vocabulary.", "This meeting could have been an email.", "The synergy is aggressively present.", "No notes. Several questions.", "That answer has earned a performance review.", "Congratulations on making it everyone’s problem."];
+const ANSWER_DURATION_MS = 90_000;
+const VOTE_DURATION_MS = 45_000;
 
 export class GameEngine {
   readonly room: Room;
@@ -87,7 +89,7 @@ export class GameEngine {
     this.room.round = round; this.room.phase = "answering"; this.room.answers = []; this.room.votes = {};
     this.room.winnerId = undefined; this.room.powerChoice = undefined; this.room.powerChooserId = undefined;
     this.room.prompt = round === 3 ? selected[0] : undefined;
-    this.room.deadline = Date.now() + 45_000;
+    this.room.deadline = Date.now() + ANSWER_DURATION_MS;
     if (round < 3) {
       const ps = this.room.players;
       this.room.pairs = ps.map((p, i) => {
@@ -114,7 +116,7 @@ export class GameEngine {
     const required = this.room.round < 3 ? this.room.players.length * 4 : this.room.players.length;
     if (this.room.answers.length >= required) {
       this.room.phase = "voting";
-      this.room.deadline = Date.now() + 45_000;
+      this.room.deadline = Date.now() + VOTE_DURATION_MS;
     }
   }
   vote(voterId: string, answerId: string) {
@@ -182,7 +184,7 @@ export class GameEngine {
       } else for (const p of this.room.players) if (!this.room.answers.some(a => a.playerId === p.id))
         this.room.answers.push({ id: `${p.id}:final:0`, playerId: p.id, question: 0, text: "", submitted: false });
       this.room.phase = "voting";
-      this.room.deadline = Date.now() + 45_000;
+      this.room.deadline = Date.now() + VOTE_DURATION_MS;
       return;
     }
     if (this.room.phase === "voting") this.finishResults();

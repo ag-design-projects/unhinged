@@ -12,6 +12,7 @@ type State = {
   hostId: string;
   phase: string;
   round: number;
+  deadline?: number;
   players: Array<{ id: string; name: string }>;
   me?: { id: string; name: string };
   assignments?: Array<{ assignmentId: string; prompt: string; answer: string | null }>;
@@ -91,7 +92,9 @@ test("three clients create, join, and receive private assignments", async () => 
     for (const state of states) {
       assert.equal(state.assignments?.length, 4);
       assert.equal(state.assignments?.every(assignment => assignment.answer === null), true);
+      assert.equal(state.deadline, states[0].deadline);
     }
+    assert.ok(states[0].deadline! - Date.now() > 88_000);
     assert.notDeepEqual(states[0].assignments?.map(item => item.assignmentId), states[1].assignments?.map(item => item.assignmentId));
   } finally {
     for (const client of clients) client.disconnect();
@@ -121,6 +124,8 @@ test("preserves submitted votes when the voting deadline expires", async () => {
     const answering = clients.map(client => waitForState(client, state => state.phase === "answering" && state.round === 1));
     clients[0].emit("room:start", created.roomCode);
     const answeringStates = await Promise.all(answering);
+    assert.equal(new Set(answeringStates.map(state => state.deadline)).size, 1);
+    assert.ok(answeringStates[0].deadline! - Date.now() > 88_000);
     const voting = clients.map(client => waitForState(client, state => state.phase === "voting" && state.round === 1));
     answeringStates.forEach((state, clientIndex) => {
       for (const [answerIndex, assignment] of (state.assignments ?? []).entries()) {
@@ -133,6 +138,8 @@ test("preserves submitted votes when the voting deadline expires", async () => {
       }
     });
     const votingStates = await Promise.all(voting);
+    assert.equal(new Set(votingStates.map(state => state.deadline)).size, 1);
+    assert.ok(votingStates[0].deadline! - Date.now() > 43_000);
     const selectedAnswerId = votingStates[0].voteGroups?.[0]?.answers[0]?.id;
     assert.ok(selectedAnswerId);
 

@@ -57,7 +57,7 @@ export default function GameShell() {
 }
 
 function Waiting({ text }: { text: string }) { return <div className="flex flex-1 flex-col items-center justify-center text-center"><Check className="h-16 w-16 text-green-300" /><GameTitle className="mt-5 text-4xl">LOCKED</GameTitle><p className="mt-5 text-lg font-bold">{text}</p></div>; }
-function RoundHeader({ round, deadline }: { round: string; deadline?: number }) { const [now, setNow] = useState(Date.now()); useEffect(() => { const id = window.setInterval(() => setNow(Date.now()), 500); return () => window.clearInterval(id); }, []); const seconds = Math.max(0, Math.ceil(((deadline ?? now) - now) / 1000)); return <Header round={round} right={<span data-testid="text-timer" className="font-display text-3xl text-yellow-300">00:{String(seconds).padStart(2, "0")}</span>} />; }
+function RoundHeader({ round, deadline }: { round: string; deadline?: number }) { const [now, setNow] = useState(Date.now()); useEffect(() => { const id = window.setInterval(() => setNow(Date.now()), 500); return () => window.clearInterval(id); }, []); const seconds = Math.max(0, Math.ceil(((deadline ?? now) - now) / 1000)); return <Header round={round} right={<span data-testid="text-timer" className="font-display text-3xl text-yellow-300">{String(Math.floor(seconds / 60)).padStart(2, "0")}:{String(seconds % 60).padStart(2, "0")}</span>} />; }
 function ResultsScreen({ s, isHost, isWinner, onNext }: { s: Snapshot; isHost: boolean; isWinner: boolean; onNext: () => void }) {
   const r = s.results;
   const winner = s.players.find(p => p.id === r?.winnerId);

@@ -10,6 +10,38 @@ const started = () => {
   return game;
 };
 
+test("every answer round gets 90 seconds and voting gets 45 seconds", () => {
+  const game = started();
+  const assertAnswerDeadline = () => {
+    const now = Date.now();
+    assert.equal(game.room.phase, "answering");
+    assert.ok(game.room.deadline! >= now + 90_000 - 1_000);
+    assert.ok(game.room.deadline! <= now + 90_000);
+    for (const p of game.room.players) assert.equal(snapshot(game.room, p.id).deadline, game.room.deadline);
+  };
+  const assertVoteDeadline = () => {
+    const now = Date.now();
+    assert.equal(game.room.phase, "voting");
+    assert.ok(game.room.deadline! >= now + 45_000 - 1_000);
+    assert.ok(game.room.deadline! <= now + 45_000);
+  };
+  assertAnswerDeadline();
+  // All players submitting early starts a fresh voting window.
+  for (const pair of game.room.pairs) for (const id of pair.playerIds) for (let q = 0; q < 2; q++) game.answer(id, `${id}${q}`, pair.id, q);
+  assertVoteDeadline();
+  game.timeout(); game.next();
+  game.choosePower(game.room.powerChooserId!, "word", game.room.players.find(p => p.id !== game.room.powerChooserId)!.id);
+  game.next();
+  assertAnswerDeadline();
+  // Letting the answer window expire also starts a 45-second vote.
+  game.timeout();
+  assertVoteDeadline();
+  game.timeout(); game.next();
+  game.choosePower(game.room.powerChooserId!, "word", game.room.players.find(p => p.id !== game.room.powerChooserId)!.id);
+  game.next();
+  assertAnswerDeadline();
+});
+
 test("creates exactly n pair sets and four answers per player", () => {
   const game = started();
   assert.equal(game.room.pairs.length, 3);
