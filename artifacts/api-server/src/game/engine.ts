@@ -1,3 +1,5 @@
+import { curatedPrompts, fallbackPrompts, replenishPrompts } from "./prompts";
+
 export type Phase =
   | "lobby" | "answering" | "voting" | "results"
   | "powerSelect" | "powerReveal" | "gameOver";
@@ -11,18 +13,14 @@ export interface Answer { id: string; playerId: string; pairId?: string; questio
 export interface Modifier { type: PowerType; value: string; targetPlayerId: string; }
 export interface Room {
   code: string; hostId: string; players: Player[]; phase: Phase; round: number;
-  pairs: Pair[]; prompt?: string; answers: Answer[]; votes: Record<string, string>;
+  pairs: Pair[]; prompt?: string; usedPrompts?: string[]; answers: Answer[]; votes: Record<string, string>;
   modifier: Modifier | null; winnerId?: string; roastLine: string | null;
   powerChooserId?: string; powerChoice?: PowerType; deadline?: number;
 }
 
-const prompts = [
-  "The real reason this meeting exists is ______.",
-  "The most dangerous sentence in corporate life is ______.",
-  "My manager said “quick question” and then ______.",
-  "The real meaning of “let’s circle back” is ______.",
-  "Someone says “make it pop.” What they actually mean is ______.",
-];
+const validPrompt = (prompt: unknown): prompt is string =>
+  typeof prompt === "string" && prompt.length <= 160 && !/[\r\n]/.test(prompt) &&
+  prompt.split("______").length === 2 && prompt.trim().length > 6;
 const words = ["synergy", "alignment", "bandwidth", "leverage", "circle-back", "deliverable", "stakeholder", "pivot", "roadmap", "touch-base", "workflow", "scalable", "quick-win", "deep-dive", "actionable", "visibility", "ideate", "optics", "boil-the-ocean", "low-hanging-fruit"];
 const personas = ["an overly optimistic CEO", "a passive-aggressive manager", "an HR manager trying not to panic", "a LinkedIn influencer", "a brutally honest intern", "a CEO who has no idea what is happening"];
 const fallbackRoasts = ["That answer has been forwarded to absolutely nobody.", "Bold strategy. The board is concerned.", "Somewhere, a spreadsheet just sighed.", "Absolutely aligned with the chaos.", "A truly impressive use of workplace vocabulary.", "This meeting could have been an email.", "The synergy is aggressively present.", "No notes. Several questions.", "That answer has earned a performance review.", "Congratulations on making it everyone’s problem."];
@@ -30,9 +28,16 @@ const fallbackRoasts = ["That answer has been forwarded to absolutely nobody.", 
 export class GameEngine {
   readonly room: Room;
   private readonly random: () => number;
-  constructor(code: string, host: Player, random = Math.random, restoredRoom?: Room) {
+  private readonly promptSource: () => readonly string[];
+  constructor(code: string, host: Player, random = Math.random, restoredRoom?: Room, promptSource = replenishPrompts) {
     this.random = random;
-    this.room = restoredRoom ?? { code, hostId: host.id, players: [host], phase: "lobby", round: 0, pairs: [], answers: [], votes: {}, modifier: null, roastLine: null };
+    this.promptSource = promptSource;
+    this.room = restoredRoom ?? { code, hostId: host.id, players: [host], phase: "lobby", round: 0, pairs: [], usedPrompts: [], answers: [], votes: {}, modifier: null, roastLine: null };
+    // Older persisted rooms have no history; at least protect their active assignments.
+    this.room.usedPrompts ??= [...new Set([
+      ...this.room.pairs.flatMap(pair => pair.prompts),
+      ...(this.room.round === 3 && this.room.prompt ? [this.room.prompt] : []),
+    ])];
   }
   static restore(room: Room, random = Math.random) {
     if (!room.players[0]) throw new Error("Cannot restore an empty room");
@@ -49,16 +54,45 @@ export class GameEngine {
     if (this.room.players.length < 3) throw new Error("At least 3 players are required");
     this.startRound(1);
   }
+  private drawPrompts(count: number): string[] {
+    const used = new Set(this.room.usedPrompts);
+    const available: string[] = [];
+    const add = (candidates: readonly unknown[]) => {
+      for (const candidate of candidates) {
+        if (validPrompt(candidate) && !used.has(candidate) && !available.includes(candidate)) available.push(candidate);
+      }
+    };
+    add(curatedPrompts);
+    if (available.length < count) {
+      try {
+        const replenished = this.promptSource();
+        if (Array.isArray(replenished)) add(replenished);
+      } catch {
+        // A failed source is not allowed to interrupt the round.
+      }
+    }
+    if (available.length < count) add(fallbackPrompts);
+    // Rooms have at most eight players and need at most 33 prompts per match.
+    if (available.length < count) throw new Error("Prompt catalog exhausted");
+    const selected: string[] = [];
+    for (let i = 0; i < count; i++) {
+      const index = Math.min(available.length - 1, Math.max(0, Math.floor(this.random() * available.length)));
+      selected.push(available.splice(index, 1)[0]);
+    }
+    this.room.usedPrompts!.push(...selected);
+    return selected;
+  }
   private startRound(round: number) {
+    const selected = this.drawPrompts(round < 3 ? this.room.players.length * 2 : 1);
     this.room.round = round; this.room.phase = "answering"; this.room.answers = []; this.room.votes = {};
     this.room.winnerId = undefined; this.room.powerChoice = undefined; this.room.powerChooserId = undefined;
-    this.room.prompt = prompts[(round - 1) % prompts.length];
+    this.room.prompt = round === 3 ? selected[0] : undefined;
     this.room.deadline = Date.now() + 45_000;
     if (round < 3) {
       const ps = this.room.players;
       this.room.pairs = ps.map((p, i) => {
         const other = ps[(i + 1) % ps.length];
-        return { id: `r${round}-p${i}`, playerIds: [p.id, other.id], prompts: [prompts[(round + i) % prompts.length], prompts[(round + i + 1) % prompts.length]] };
+        return { id: `r${round}-p${i}`, playerIds: [p.id, other.id], prompts: [selected[2 * i], selected[2 * i + 1]] };
       });
     } else this.room.pairs = [];
   }
@@ -138,7 +172,7 @@ export class GameEngine {
     for (const player of this.room.players) { player.score = 0; player.abilityPoints = 0; }
     this.room.phase = "lobby"; this.room.round = 0; this.room.answers = []; this.room.votes = {};
     this.room.pairs = []; this.room.modifier = null; this.room.roastLine = null; this.room.winnerId = undefined; this.room.deadline = undefined;
-    this.room.powerChooserId = undefined; this.room.powerChoice = undefined; this.room.prompt = undefined;
+    this.room.powerChooserId = undefined; this.room.powerChoice = undefined; this.room.prompt = undefined; this.room.usedPrompts = [];
   }
   timeout() {
     if (this.room.phase === "answering") {

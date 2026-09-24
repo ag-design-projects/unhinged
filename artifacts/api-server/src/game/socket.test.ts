@@ -179,7 +179,9 @@ test("eight clients complete a full round with the expected assignments, votes, 
       assert.equal(state.players.length, 8);
       assert.equal(state.assignments?.length, 4);
       assert.equal(new Set(state.assignments?.map(assignment => assignment.assignmentId)).size, 4);
+      assert.equal(new Set(state.assignments?.map(assignment => assignment.prompt)).size, 4);
     }
+    assert.equal(new Set(answeringStates.flatMap(state => state.assignments?.map(a => a.prompt))).size, 16);
 
     const voting = clients.map(client => waitForState(client, state => state.phase === "voting" && state.round === 1));
     answeringStates.forEach((state, clientIndex) => {
@@ -353,6 +355,13 @@ test("three clients complete all rounds, a deadline transition, powers, final re
     const round1Answering = waitForAll("answering", 1);
     clients[0].emit("room:start", created.roomCode);
     let answeringStates = await round1Answering;
+    const seenPrompts = new Set<string>();
+    const checkPrompts = (states: State[]) => {
+      const prompts = new Set(states.flatMap(state => state.assignments?.map(a => a.prompt) ?? []));
+      for (const prompt of prompts) assert.equal(seenPrompts.has(prompt), false);
+      for (const prompt of prompts) seenPrompts.add(prompt);
+    };
+    checkPrompts(answeringStates);
     let votingStates = await submitAnswers(answeringStates, 1);
     let resultStates = await submitVotes(votingStates, 1);
     assert.equal(resultStates[0].results?.leaderboard.reduce((sum, player) => sum + player.score, 0), 600);
@@ -383,6 +392,7 @@ test("three clients complete all rounds, a deadline transition, powers, final re
     };
 
     answeringStates = await usePowerAndContinue(1, resultStates);
+    checkPrompts(answeringStates);
 
     const round2Voting = waitForAll("voting", 2);
     clients[0].emit("game:answer", created.roomCode, {
@@ -396,6 +406,8 @@ test("three clients complete all rounds, a deadline transition, powers, final re
     assert.equal(resultStates[0].results?.leaderboard.reduce((sum, player) => sum + player.score, 0), 1_500);
 
     answeringStates = await usePowerAndContinue(2, resultStates);
+    checkPrompts(answeringStates);
+    assert.equal(seenPrompts.size, 13);
     votingStates = await submitAnswers(answeringStates, 3);
     resultStates = await submitVotes(votingStates, 3);
     const finalLeaderboard = resultStates[0].results?.leaderboard;
@@ -419,6 +431,10 @@ test("three clients complete all rounds, a deadline transition, powers, final re
       assert.equal(state.assignments, undefined);
       assert.equal(state.modifier, undefined);
     }
+    const replay = waitForAll("answering", 1);
+    clients[0].emit("room:start", created.roomCode);
+    const replayStates = await replay;
+    assert.equal(new Set(replayStates.flatMap(state => state.assignments?.map(a => a.prompt))).size, 6);
   } finally {
     for (const client of clients) client.disconnect();
     await io.close();

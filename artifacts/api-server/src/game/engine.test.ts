@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { GameEngine, snapshot, type Player } from "./engine";
+import { curatedPrompts } from "./prompts";
 
 const player = (id: string): Player => ({ id, name: id, score: 0, abilityPoints: 0 });
 const started = () => {
@@ -59,4 +60,66 @@ test("answer timeout opens voting and vote timeout preserves real votes", () => 
   assert.equal(game.room.phase, "results");
   assert.equal(Object.values(game.room.votes).length, 1);
   assert.equal(Object.values(game.room.votes)[0], chosen);
+});
+
+test("eight-player matches draw unique questions across all rounds, restore, and reset on rematch", () => {
+  const game = new GameEngine("FULL", player("p0"), () => 0);
+  for (let i = 1; i < 8; i++) game.addPlayer(player(`p${i}`));
+  game.start("p0");
+  const first = game.room.pairs.flatMap(pair => pair.prompts);
+  assert.equal(first.length, 16);
+  assert.equal(new Set(first).size, 16);
+  for (const p of game.room.players) {
+    const assignments = snapshot(game.room, p.id).assignments as Array<{ prompt: string }>;
+    assert.equal(new Set(assignments.map(a => a.prompt)).size, 4);
+  }
+
+  game.timeout(); game.timeout(); game.next();
+  const chooser = game.room.powerChooserId!;
+  game.choosePower(chooser, "word", game.room.players.find(p => p.id !== chooser)!.id);
+  game.next();
+  const second = game.room.pairs.flatMap(pair => pair.prompts);
+  assert.equal(new Set([...first, ...second]).size, 32);
+
+  // History survives a server restart before the final round.
+  const restored = GameEngine.restore(structuredClone(game.room), () => 0);
+  restored.timeout(); restored.timeout(); restored.next();
+  const secondChooser = restored.room.powerChooserId!;
+  restored.choosePower(secondChooser, "word", restored.room.players.find(p => p.id !== secondChooser)!.id);
+  restored.next();
+  assert.ok(restored.room.prompt);
+  assert.equal(new Set([...first, ...second, restored.room.prompt]).size, 33);
+  assert.equal(restored.room.usedPrompts?.length, 33);
+  restored.timeout(); restored.timeout(); restored.next();
+  restored.rematch("p0");
+  assert.deepEqual(restored.room.usedPrompts, []);
+  restored.start("p0");
+  assert.equal(restored.room.pairs.length, 8);
+  assert.equal(new Set(restored.room.pairs.flatMap(pair => pair.prompts)).size, 16);
+});
+
+test("exhausted curated prompts replenish, and a broken source uses validated fallback without blocking", () => {
+  const game = new GameEngine("FALLBACK", player("a"), () => 0, undefined, () => {
+    throw new Error("Source unavailable");
+  });
+  game.addPlayer(player("b")); game.addPlayer(player("c"));
+  game.room.usedPrompts = [...curatedPrompts];
+  game.start("a");
+  const first = game.room.pairs.flatMap(pair => pair.prompts);
+  assert.equal(first.length, 6);
+  assert.equal(new Set(first).size, 6);
+  assert.equal(first.some(prompt => curatedPrompts.includes(prompt as typeof curatedPrompts[number])), false);
+  game.timeout(); game.timeout(); game.next();
+  const chooser = game.room.powerChooserId!;
+  game.choosePower(chooser, "word", game.room.players.find(p => p.id !== chooser)!.id);
+  game.next();
+  assert.equal(new Set([...first, ...game.room.pairs.flatMap(pair => pair.prompts)]).size, 12);
+
+  const invalid = new GameEngine("INVALID", player("a"), () => 0, undefined,
+    () => ["No blank", "Bad\n______", "Valid ______.", "Valid ______."]);
+  invalid.addPlayer(player("b")); invalid.addPlayer(player("c"));
+  invalid.room.usedPrompts = [...curatedPrompts];
+  invalid.start("a");
+  assert.equal(invalid.room.pairs.flatMap(pair => pair.prompts).filter(prompt => prompt === "Valid ______.").length, 1);
+  assert.equal(new Set(invalid.room.pairs.flatMap(pair => pair.prompts)).size, 6);
 });
