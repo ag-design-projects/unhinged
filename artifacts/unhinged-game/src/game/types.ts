@@ -12,7 +12,7 @@ export interface Results {
 }
 export interface Snapshot {
   roomCode: string; hostId: string; phase: Phase; round: number;
-  players: Player[]; prompt?: string; deadline?: number;
+  players: Player[]; prompt?: string; deadline?: number; avoidRecentPrompts: boolean;
   me: Player | null;
   progress: { submitted: number; required: number };
   assignments?: Assignment[]; voteGroups?: VoteGroup[]; answerList?: AnswerEntry[]; results?: Results;

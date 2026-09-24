@@ -1,4 +1,4 @@
-import { curatedPrompts, fallbackPrompts, replenishPrompts } from "./prompts";
+import { curatedPrompts, fallbackPrompts, replenishPrompts, RECENT_PROMPT_LIMIT } from "./prompts";
 
 export type Phase =
   | "lobby" | "answering" | "voting" | "results"
@@ -13,7 +13,7 @@ export interface Answer { id: string; playerId: string; pairId?: string; questio
 export interface Modifier { type: PowerType; value: string; targetPlayerId: string; }
 export interface Room {
   code: string; hostId: string; players: Player[]; phase: Phase; round: number;
-  pairs: Pair[]; prompt?: string; usedPrompts?: string[]; answers: Answer[]; votes: Record<string, string>;
+  pairs: Pair[]; prompt?: string; usedPrompts?: string[]; recentPrompts?: string[]; avoidRecentPrompts?: boolean; answers: Answer[]; votes: Record<string, string>;
   modifier: Modifier | null; winnerId?: string; roastLine: string | null;
   powerChooserId?: string; powerChoice?: PowerType; deadline?: number;
 }
@@ -34,12 +34,15 @@ export class GameEngine {
   constructor(code: string, host: Player, random = Math.random, restoredRoom?: Room, promptSource = replenishPrompts) {
     this.random = random;
     this.promptSource = promptSource;
-    this.room = restoredRoom ?? { code, hostId: host.id, players: [host], phase: "lobby", round: 0, pairs: [], usedPrompts: [], answers: [], votes: {}, modifier: null, roastLine: null };
+    this.room = restoredRoom ?? { code, hostId: host.id, players: [host], phase: "lobby", round: 0, pairs: [], usedPrompts: [], recentPrompts: [], avoidRecentPrompts: false, answers: [], votes: {}, modifier: null, roastLine: null };
     // Older persisted rooms have no history; at least protect their active assignments.
     this.room.usedPrompts ??= [...new Set([
       ...this.room.pairs.flatMap(pair => pair.prompts),
       ...(this.room.round === 3 && this.room.prompt ? [this.room.prompt] : []),
     ])];
+    this.room.recentPrompts = (Array.isArray(this.room.recentPrompts) ? this.room.recentPrompts : [])
+      .filter(validPrompt).slice(-RECENT_PROMPT_LIMIT);
+    this.room.avoidRecentPrompts = this.room.avoidRecentPrompts === true;
   }
   static restore(room: Room, random = Math.random) {
     if (!room.players[0]) throw new Error("Cannot restore an empty room");
@@ -56,16 +59,28 @@ export class GameEngine {
     if (this.room.players.length < 3) throw new Error("At least 3 players are required");
     this.startRound(1);
   }
+  setAvoidRecentPrompts(playerId: string, enabled: boolean) {
+    if (playerId !== this.room.hostId) throw new Error("Only the host can change prompt settings");
+    if (this.room.phase !== "lobby") throw new Error("Prompt settings can only change in the lobby");
+    if (typeof enabled !== "boolean") throw new Error("Invalid prompt setting");
+    this.room.avoidRecentPrompts = enabled;
+  }
   private drawPrompts(count: number): string[] {
     const used = new Set(this.room.usedPrompts);
-    const available: string[] = [];
+    const recent = new Set(this.room.avoidRecentPrompts ? this.room.recentPrompts : []);
+    const fresh: string[] = [];
+    const older: string[] = [];
+    const seen = new Set<string>();
     const add = (candidates: readonly unknown[]) => {
       for (const candidate of candidates) {
-        if (validPrompt(candidate) && !used.has(candidate) && !available.includes(candidate)) available.push(candidate);
+        if (validPrompt(candidate) && !used.has(candidate) && !seen.has(candidate)) {
+          seen.add(candidate);
+          (recent.has(candidate) ? older : fresh).push(candidate);
+        }
       }
     };
     add(curatedPrompts);
-    if (available.length < count) {
+    if (fresh.length < count) {
       try {
         const replenished = this.promptSource();
         if (Array.isArray(replenished)) add(replenished);
@@ -73,7 +88,8 @@ export class GameEngine {
         // A failed source is not allowed to interrupt the round.
       }
     }
-    if (available.length < count) add(fallbackPrompts);
+    if (fresh.length < count) add(fallbackPrompts);
+    const available = fresh.length >= count ? fresh : [...fresh, ...older];
     // Rooms have at most eight players and need at most 33 prompts per match.
     if (available.length < count) throw new Error("Prompt catalog exhausted");
     const selected: string[] = [];
@@ -171,6 +187,7 @@ export class GameEngine {
   setRoast(line?: string) { this.room.roastLine = line?.slice(0, 140) || fallbackRoasts[Math.floor(this.random() * fallbackRoasts.length)]; }
   rematch(playerId: string) {
     if (playerId !== this.room.hostId) throw new Error("Only the host can rematch");
+    this.room.recentPrompts = [...this.room.recentPrompts!, ...this.room.usedPrompts!].slice(-RECENT_PROMPT_LIMIT);
     for (const player of this.room.players) { player.score = 0; player.abilityPoints = 0; }
     this.room.phase = "lobby"; this.room.round = 0; this.room.answers = []; this.room.votes = {};
     this.room.pairs = []; this.room.modifier = null; this.room.roastLine = null; this.room.winnerId = undefined; this.room.deadline = undefined;
@@ -205,6 +222,7 @@ export function snapshot(room: Room, viewerId: string) {
   const dto: Record<string, unknown> = {
     roomCode: room.code, hostId: room.hostId, phase: room.phase, round: room.round,
     players: publicPlayers, prompt: room.prompt, deadline: room.deadline,
+    avoidRecentPrompts: room.avoidRecentPrompts === true,
     me: own ? { id: own.id, name: own.name, score: own.score, abilityPoints: own.abilityPoints } : null,
     winnerId: room.winnerId,
     powerChooserId: room.powerChooserId,

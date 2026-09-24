@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { GameEngine, snapshot, type Player } from "./engine";
-import { curatedPrompts } from "./prompts";
+import { curatedPrompts, fallbackPrompts, RECENT_PROMPT_LIMIT, replenishPrompts } from "./prompts";
+import { MemoryRoomStore } from "./persistence";
 
 const player = (id: string): Player => ({ id, name: id, score: 0, abilityPoints: 0 });
 const started = () => {
@@ -194,4 +195,86 @@ test("exhausted curated prompts replenish, and a broken source uses validated fa
   invalid.start("a");
   assert.equal(invalid.room.pairs.flatMap(pair => pair.prompts).filter(prompt => prompt === "Valid ______.").length, 1);
   assert.equal(new Set(invalid.room.pairs.flatMap(pair => pair.prompts)).size, 6);
+});
+
+const finishMatch = (game: GameEngine) => {
+  for (let round = 1; round <= 3; round++) {
+    game.timeout(); game.timeout(); game.next();
+    if (round < 3) {
+      const chooser = game.room.powerChooserId!;
+      game.choosePower(chooser, "word", game.room.players.find(p => p.id !== chooser)!.id);
+      game.next();
+    }
+  }
+  assert.equal(game.room.phase, "gameOver");
+};
+
+test("host can opt in before starting; multiple rematches prioritize fresh prompts and bound room history", () => {
+  const game = new GameEngine("AGAIN", player("a"), () => 0);
+  game.addPlayer(player("b")); game.addPlayer(player("c"));
+  assert.equal(snapshot(game.room, "b").avoidRecentPrompts, false);
+  assert.throws(() => game.setAvoidRecentPrompts("b", true), /Only the host/);
+  assert.throws(() => game.setAvoidRecentPrompts("a", "yes" as unknown as boolean), /Invalid prompt setting/);
+  game.setAvoidRecentPrompts("a", true);
+  assert.equal(snapshot(game.room, "b").avoidRecentPrompts, true);
+  let prior = new Set<string>();
+  for (let match = 0; match < 5; match++) {
+    game.start("a");
+    assert.throws(() => game.setAvoidRecentPrompts("a", false), /lobby/);
+    const firstRound = game.room.pairs.flatMap(pair => pair.prompts);
+    assert.equal(firstRound.some(prompt => prior.has(prompt)), false);
+    finishMatch(game);
+    const thisMatch = [...game.room.usedPrompts!];
+    assert.equal(thisMatch.length, 13);
+    assert.equal(new Set(thisMatch).size, 13);
+    assert.equal(thisMatch.some(prompt => prior.has(prompt)), false);
+    game.rematch("a");
+    assert.deepEqual(game.room.usedPrompts, []);
+    assert.equal(game.room.avoidRecentPrompts, true);
+    assert.ok(game.room.recentPrompts!.length <= RECENT_PROMPT_LIMIT);
+    prior = new Set(game.room.recentPrompts);
+  }
+  assert.equal(game.room.recentPrompts?.length, RECENT_PROMPT_LIMIT);
+  assert.equal(game.room.recentPrompts?.includes(curatedPrompts[0]), false);
+});
+
+test("restored rooms retain the host setting and recent prompt history", async () => {
+  const game = new GameEngine("DURABLE", player("a"), () => 0);
+  game.addPlayer(player("b")); game.addPlayer(player("c"));
+  game.setAvoidRecentPrompts("a", true);
+  game.start("a");
+  finishMatch(game);
+  const firstMatch = [...game.room.usedPrompts!];
+  game.rematch("a");
+  const store = new MemoryRoomStore();
+  await store.save(game.room);
+  const [saved] = await store.loadAll();
+  const restored = GameEngine.restore(saved, () => 0);
+  assert.deepEqual(restored.room.recentPrompts, firstMatch);
+  assert.equal(restored.room.avoidRecentPrompts, true);
+  restored.start("a");
+  assert.equal(restored.room.pairs.flatMap(pair => pair.prompts).some(prompt => firstMatch.includes(prompt)), false);
+  finishMatch(restored);
+  restored.rematch("a");
+  assert.equal(restored.room.recentPrompts?.length, 26);
+
+  // An older room without these fields still restores with the original behavior.
+  delete saved.recentPrompts;
+  delete saved.avoidRecentPrompts;
+  const legacy = GameEngine.restore(saved, () => 0);
+  assert.equal(legacy.room.avoidRecentPrompts, false);
+  assert.deepEqual(legacy.room.recentPrompts, []);
+});
+
+test("when every source has been seen recently, older prompts fill the round without repeats", () => {
+  const game = new GameEngine("LOW", player("a"), () => 0, undefined,
+    () => ["Fresh one ______.", "Fresh two ______.", ...replenishPrompts()]);
+  game.addPlayer(player("b")); game.addPlayer(player("c"));
+  game.setAvoidRecentPrompts("a", true);
+  game.room.recentPrompts = [...curatedPrompts, ...fallbackPrompts, ...replenishPrompts()];
+  game.start("a");
+  const chosen = game.room.pairs.flatMap(pair => pair.prompts);
+  assert.deepEqual(chosen.slice(0, 2), ["Fresh one ______.", "Fresh two ______."]);
+  assert.equal(new Set(chosen).size, 6);
+  assert.equal(game.room.phase, "answering");
 });

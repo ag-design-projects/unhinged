@@ -72,6 +72,7 @@ export function useGameSocket() {
     snapshot, lastResults, error, disconnected, reconnecting, clearError: () => setError(""),
     create, join,
     start: () => emit("room:start", snapshot?.roomCode),
+    setAvoidRecentPrompts: (enabled: boolean) => emit("room:prompt-setting", snapshot?.roomCode, enabled),
     answer: (input: { text: string; pairId?: string; question?: number }) => emit("game:answer", snapshot?.roomCode, input),
     vote: (answerId: string) => emit("game:vote", snapshot?.roomCode, { answerId }),
     next: () => emit("game:next", snapshot?.roomCode),

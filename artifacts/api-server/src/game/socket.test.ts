@@ -13,6 +13,7 @@ type State = {
   phase: string;
   round: number;
   deadline?: number;
+  avoidRecentPrompts?: boolean;
   players: Array<{ id: string; name: string }>;
   me?: { id: string; name: string };
   assignments?: Array<{ assignmentId: string; prompt: string; answer: string | null }>;
@@ -85,6 +86,16 @@ test("three clients create, join, and receive private assignments", async () => 
     const lobbyReady = waitForState(clients[0], state => state.phase === "lobby" && state.players.length === 3);
     await emitWithAck(clients[2], "room:join", { roomCode: created.roomCode, name: "Rahul" });
     assert.equal((await lobbyReady).players.length, 3);
+
+    const denied = waitForGameError(clients[1]);
+    clients[1].emit("room:prompt-setting", created.roomCode, true);
+    assert.match(await denied, /Only the host/);
+    const invalid = waitForGameError(clients[0]);
+    clients[0].emit("room:prompt-setting", created.roomCode, "true");
+    assert.match(await invalid, /Invalid prompt setting/);
+    const updated = clients.map(client => waitForState(client, state => state.avoidRecentPrompts === true));
+    clients[0].emit("room:prompt-setting", created.roomCode, true);
+    assert.equal((await Promise.all(updated)).every(state => state.avoidRecentPrompts), true);
 
     const answering = clients.map(client => waitForState(client, state => state.phase === "answering"));
     clients[0].emit("room:start", created.roomCode);

@@ -33,6 +33,9 @@ export const curatedPrompts = [
   "Our biggest competitive advantage is apparently ______.",
 ] as const;
 
+// Retain roughly two full eight-player matches, without growing persisted rooms forever.
+export const RECENT_PROMPT_LIMIT = 64;
+
 // A local, bounded source keeps prompt replenishment independent of network services.
 const situations = [
   "Monday's stand-up", "the annual retreat", "the budget review",

@@ -214,6 +214,7 @@ export function attachGameSocket(io: Server, options: {
       };
     };
     socket.on("room:start", action((g, p) => { g.start(p.id); scheduleTimeout(io, g, timeoutMs, persist); }));
+    socket.on("room:prompt-setting", action((g, p, enabled: unknown) => g.setAvoidRecentPrompts(p.id, enabled as boolean)));
     socket.on("game:answer", action((g, p, input: { text: string; pairId?: string; question?: number }) => { g.answer(p.id, input.text, input.pairId, input.question ?? 0); if (g.room.phase === "voting") scheduleTimeout(io, g, timeoutMs, persist); }));
     socket.on("game:vote", action((g, p, input: { answerId: string }) => { g.vote(p.id, input.answerId); if (g.room.phase === "results") scheduleRoast(io, g, persist); }));
     socket.on("game:next", action((g, p) => { if (p.id !== g.room.hostId && p.id !== g.room.powerChooserId) throw new Error("Only the host or winner can continue"); g.next(); if (g.room.phase === "answering") scheduleTimeout(io, g, timeoutMs, persist); }));
