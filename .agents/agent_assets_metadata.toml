@@ -1,0 +1,16 @@
+uploads = []
+generated = []
+
+[[outputs]]
+id = "8DC89B6qOwHqLRIU2WHP7"
+uri = "file://artifacts/unhinged-game/docs/information-architecture.md"
+type = "text"
+title = "UNHINGED — Sitemap & Information Architecture"
+description = "Markdown map of the existing entry screens, game phases, player roles, voting visibility, and recovery states."
+logical_id = "1bd49d2a-ff22-4b04-84dc-2a3a9a9f14fe"
+content_hash = "sha256:603dbc95fcba2b45e0f1009cef8b9b51c1e9cce1ee2ac85c59585bac51cffd14"
+size = 5974
+mtime_ms = 1790782608186
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:8d60e678-8095-46d0-870b-47a1a1abebeb/1bd49d2a-ff22-4b04-84dc-2a3a9a9f14fe/b6a617ce-46fd-4db2-9df9-697dd6175356"
+storage_version_token = "1790782625321808"
+content_type = "text/markdown"
